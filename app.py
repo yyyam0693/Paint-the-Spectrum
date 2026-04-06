@@ -257,7 +257,7 @@ def explain_preset(name: str) -> str:
             "components — the classic tool for killing periodic interference "
             "(scan lines, moiré, 50/60 Hz stripes). **Why a pair?** Because our "
             "image is real-valued, its Fourier transform obeys **conjugate "
-            "symmetry**: $G[-k,\\,-l] = G[k,\\,l]^*$ (Chapter 4, DFT "
+            "symmetry**: $G[-k,\\,-l] = G^*[k,\\,l]$ (Chapter 4, DFT "
             "properties). If we zeroed only one bin, its conjugate partner on "
             "the opposite side of DC would survive and the inverse FFT would "
             "produce a complex image. Removing the **symmetric pair** keeps the "
@@ -588,7 +588,7 @@ with tab1:
     st.plotly_chart(fig_hover, use_container_width=False, key="tab1_hover_spectrum")
     st.caption(
         "**Symmetry check (Chapter 4).** Because the image is real-valued, its "
-        "Fourier transform obeys $G[-k,\\,-l] = G[k,\\,l]^*$, so the "
+        "Fourier transform obeys $G[-k,\\,-l] = G^*[k,\\,l]$, so the "
         "magnitude spectrum is point-symmetric about the centre. Hover a bright "
         "spot and its opposite across DC — their magnitudes should match."
     )
