@@ -199,32 +199,96 @@ def make_directional_strip_mask(shape, orientation: str, width: int) -> np.ndarr
 # =============================================================================
 # Educational text helpers
 # =============================================================================
-def explain_mask_effect(mask: np.ndarray, shape) -> str:
-    """Short heuristic interpretation of *where* frequencies were removed."""
-    h, w = shape
+def explain_mask_effect(mask: np.ndarray, shifted_fft: np.ndarray) -> str:
+    """
+    Explain the mask effect using energy-weighted frequency regions instead of
+    a plain average radius. Handles multiple removed regions better.
+
+    Regions:
+      - low:  r_norm < 0.20
+      - mid:  0.20 <= r_norm <= 0.50
+      - high: r_norm > 0.50
+
+    Weighting:
+      - uses |G[k,l]| as a proxy for importance
+      - so removing a bright low-frequency patch counts more than removing a
+        large but dim outer patch
+    """
+    h, w = mask.shape
     cy, cx = h // 2, w // 2
-    y, x = _centered_grid(shape)
+    y, x = _centered_grid((h, w))
     r = np.sqrt(y ** 2 + x ** 2)
     r_max = float(np.sqrt(cy ** 2 + cx ** 2))
+    r_norm = r / max(r_max, 1e-9)
 
     removed = mask < 0.5
     if not removed.any():
         return "No frequencies were removed — the reconstruction matches the original."
 
-    mean_r = float(r[removed].mean()) / max(r_max, 1e-9)
+    # Pixel coverage (same idea as before, but not used alone)
     coverage = float(removed.mean()) * 100.0
 
-    if mean_r < 0.20:
-        hint = ("Most of what you removed is **near the center**, i.e. **low** frequencies. "
-                "Expect broad smooth structure to weaken — the image may look faded or edge-like.")
-    elif mean_r > 0.50:
-        hint = ("Most of what you removed is **far from the center**, i.e. **high** frequencies. "
-                "Expect fine detail and sharp edges to blur.")
-    else:
-        hint = ("You removed **mid-range** frequencies. Medium-scale texture and repeating "
-                "patterns are most affected.")
+    # Energy weighting from the original shifted FFT
+    mag = np.abs(shifted_fft).astype(np.float64)
+    total_energy = mag.sum()
 
-    return f"Removed {coverage:.1f}% of the spectrum. {hint}"
+    removed_energy = mag[removed].sum()
+    removed_energy_pct = 100.0 * removed_energy / max(total_energy, 1e-12)
+
+    low = r_norm < 0.20
+    mid = (r_norm >= 0.20) & (r_norm <= 0.50)
+    high = r_norm > 0.50
+
+    low_e = mag[removed & low].sum()
+    mid_e = mag[removed & mid].sum()
+    high_e = mag[removed & high].sum()
+
+    bucket_total = low_e + mid_e + high_e + 1e-12
+    low_share = low_e / bucket_total
+    mid_share = mid_e / bucket_total
+    high_share = high_e / bucket_total
+
+    # Primary label = dominant removed region by energy
+    shares = {
+        "low": low_share,
+        "mid": mid_share,
+        "high": high_share,
+    }
+    dominant = max(shares, key=shares.get)
+
+    # Build explanation text
+    if dominant == "low":
+        main = (
+            "The removal is dominated by **low frequencies near the center**, "
+            "so broad smooth structure and overall intensity patterns are most affected."
+        )
+    elif dominant == "high":
+        main = (
+            "The removal is dominated by **high frequencies farther from the center**, "
+            "so fine detail and sharp edges are most affected."
+        )
+    else:
+        main = (
+            "The removal is dominated by **mid-range frequencies**, "
+            "so medium-scale texture and repeating patterns are most affected."
+        )
+
+    # Mention meaningful secondary regions too
+    secondary = []
+    if dominant != "low" and low_share > 0.20:
+        secondary.append("it includes some low-frequency removal")
+    if dominant != "mid" and mid_share > 0.20:
+        secondary.append("it includes some mid-range removal")
+    if dominant != "high" and high_share > 0.20:
+        secondary.append("it includes some high-frequency removal")
+
+    if secondary:
+        main += " In addition, " + ", and ".join(secondary) + "."
+
+    return (
+        f"Removed {coverage:.1f}% of the spectrum area, corresponding to "
+        f"{removed_energy_pct:.1f}% of the spectrum magnitude. {main}"
+    )
 
 
 def explain_preset(name: str) -> str:
@@ -742,7 +806,7 @@ with tab2:
         show_image(recon_disp, caption="Reconstructed image")
         st.caption("Inverse FFT of the edited spectrum.")
 
-    st.info(explain_mask_effect(mask, (H, W)))
+    st.info(explain_mask_effect(mask, shifted_fft))
 
     # ---- The convolution theorem (Chapter 6) ----
     st.markdown("---")
